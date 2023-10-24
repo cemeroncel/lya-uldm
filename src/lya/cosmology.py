@@ -10,14 +10,14 @@ nat.set_active_units('HEP')
 class Cosmology:
     def __init__(self, *,
                  T_cmb: float = 2.7255,
-                 omega_b: float = 0.02238280,
+                 omega_b0: float = 0.02238280,
                  N_ur: float = 3.044,
-                 omega_dm: float = 0.1201075,
+                 omega_cdm0: float = 0.1201075,
                  h: float = 0.67810):
         self.T_cmb = T_cmb
-        self.omega_b = omega_b
+        self.omega_b0 = omega_b0
         self.N_ur = N_ur
-        self.omega_dm = omega_dm
+        self.omega_cdm0 = omega_cdm0
         self.h = h
 
     def H0(self, target_unit):
@@ -46,12 +46,18 @@ class Cosmology:
         return self.Omega0_nu*(self.h**2)
 
     @property
-    def Omega_dm0(self):
-        return self.omega_dm/(self.h**2)
+    def Omega_cdm0(self):
+        return self.omega_cdm0/(self.h**2)
 
     @property
     def Omega_b0(self):
-        return self.omega_b/(self.h**2)
+        return self.omega_b0/(self.h**2)
+
+    @property
+    def Omega_Lambda0(self):
+        # Determine from the budget equation
+        return (1. - self.Omega_g0 - self.omega_nu0
+                - self.omega_cdm0 - self.omega_b0)
 
 
 if __name__ == "__main__":

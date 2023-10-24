@@ -8,6 +8,13 @@ def hubble(rho_arr: list[float]) -> float:
     return np.sqrt(np.sum(rho_arr))
 
 
+def initialize(Omega_g0: float, Omega_nu0: float, Omega_cdm0: float,
+               Omega_b0: float, Omega_Lambda0: float) -> dict:
+    Omega_tot = Omega_g0 + Omega_nu0 + Omega_cdm0 + Omega_b0 + Omega_Lambda0
+    assert np.isclose(Omega_tot, 1.)
+    return {}
+
+
 def integrate(species_list: list[Species], z_ini: float = 1e14,
               z_fin: float = 0., **solve_ivp_args):
     # Number of species in the universe

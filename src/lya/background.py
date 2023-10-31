@@ -1,5 +1,6 @@
 """Background module."""
 import numpy as np
+import natpy as nat
 from lya.species import Species
 from scipy.integrate import solve_ivp
 
@@ -50,7 +51,26 @@ def integrate(species_list: list[Species], z_ini: float = 1e14,
     sol = solve_ivp(rhs, [lna_ini, np.log(1./(1. + z_fin))],
                     y0=[tau_ini, t_ini], **solve_ivp_args)
 
+    # Create the dictionary of the energy densities and populate them
+    rho = dict()
+    for species in species_list:
+        rho[species.index] = species.get_bg_energy_density(sol.t)
+
+    # Create the Hubble array
+    H = np.zeros(len(sol.t))
+    for i, lna in enumerate(sol.t):
+        rho_arr = update_rho_arr(lna)
+        H[i] = hubble(rho_arr)
+
     if sol.success:
-        return True
+        return {
+            'sol': sol,
+            'z+1': 1./np.exp(sol.t),
+            'tau': sol.y[0],
+            't': sol.y[1],
+            't_Gyr': nat.convert(sol.y[1]*nat.Mpc, nat.Gyr).value,
+            'rho': rho,
+            'H': H
+        }
     else:
         raise RuntimeError(f"Integration failed. {sol.message}")

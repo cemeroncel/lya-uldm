@@ -23,6 +23,7 @@ class Cosmology:
     def H0(self, target_unit):
         return nat.convert(100.*self.h*nat.km/(nat.s*nat.Mpc), target_unit)
 
+    @property
     def rho_crit0_class(self):
         return (self.H0(nat.Mpc**-1)**2).value
 
@@ -56,8 +57,8 @@ class Cosmology:
     @property
     def Omega_Lambda0(self):
         # Determine from the budget equation
-        return (1. - self.Omega_g0 - self.omega_nu0
-                - self.omega_cdm0 - self.omega_b0)
+        return (1. - self.Omega_g0 - self.Omega_nu0
+                - self.Omega_cdm0 - self.Omega_b0)
 
 
 if __name__ == "__main__":

@@ -1,80 +1,75 @@
 """Module for creating the necessary files for a simulation."""
-import configparser
-from pathlib import Path
-import argparse
-import os
+from configobj import ConfigObj
 
 
-class LyaSimulation:
-    def __init__(self, configfile: str | Path, outputdir: str | Path):
-        self.configfile = Path(os.path.expanduser(configfile))
-        self.outputdir = Path(os.path.expanduser(outputdir))
-        self.config = configparser.ConfigParser()
-        self.config.read(configfile)
+class Simulation:
+    def __init__(self, *, box: float, ngrid: int, OmegaMatter: float,
+                 OmegaBaryon: float, OmegaLambda: float, h: float,
+                 output_list: list[float], cpu_time_hr: float,
+                 z_start: float = 99., seed: int = 960169,
+                 As: float = 2.215e-9, ns: float = 0.971):
+        # Input parameters
+        self.box = box
+        self.ngrid = ngrid
+        self.OmegaMatter = OmegaMatter
+        self.OmegaBaryon = OmegaBaryon
+        self.OmegaLambda = OmegaLambda
+        self.h = h
+        self.output_list = output_list
+        self.z_start = z_start
+        self.seed = seed
+        self.As = As
+        self.ns = ns
 
-    def read_genic(self):
-        c = self.config['genic']
-        self.genic = {
-            # Required parameters
-            'OutputDir': c.get('OutputDir', 'output'),
-            'FileBase': c.get('FileBase', 'IC'),
-            'BoxSize': c.getfloat('BoxSize', 10000),
-            'Ngrid': c.getint('Ngrid', 128),
-            'FileWithInputSpectrum': c.get('FileWithInputSpectrum', 'pk.dat'),
-            'Omega0': c.getfloat('Omega0', 0.2814),
-            'OmegaBaryon': c.getfloat('OmegaBaryon', 0.0464),
-            'OmegaLambda': c.getfloat('OmegaLambda', 0.7186),
-            'HubbleParam': c.getfloat('HubbleParam', 0.697),
-            'ProduceGas': c.getint('ProduceGas', 0),
-            'Redshift': c.getfloat('Redshift', 99),
-            'Seed': c.getint('Seed', 256960),
-            # Science parameters
-            'DifferentTransferFunctions': c.getint('DifferentTransferFunctions', 1),
-            'FileWithTransferFunction': c.get('FileWithTransferFunction', 'tk.dat'),
-            # Cosmology
-            'CMBTemperature': c.getfloat('CMBTemperature', 2.7255),
-            'PrimordialAmp': c.getfloat('PrimordialAmp', 2.215e-9),
-            'PrimordialIndex': c.getfloat('PrimordialIndex', 0.971),
-            # Numerical parameters.
-            # TODO: The following needs to be set according to the cluster.
-            'MaxMemSizePerNode': c.getfloat('MaxMemSizePerNode', 0.6)
-        }
+        # Hard-coded parameters
+        self.output = 'output'
+        self.ic = 'IC'
+        self.pk_filename = 'class_pk.dat'
+        self.tk_filename = 'class_tk.dat'
 
-    def read_gadget(self):
-        c = self.config['gadget']
-        self.gadget = {
-            # Required parameters
-            'InitCondFile': self.genic['OutputDir'] + self.genic['FileBase'],
-            'OutputDir': self.genic['OutputDir'],
-            'OutputList': c.get('OutputList', ''),
-            # TODO: Update according to the cluster
-            'TimeLimitCPU': c.getfloat('TimeLimitCPU', 0),
-            'BlackHoleOne': c.getint('BlackHoleOn', 0),
-            'StarformationOn': c.getint('StarformationOn', 1),
-            'WindOn': c.getint('WindOn', 0),
-            # Cosmology
-            'TimeMax:': c.getfloat('TimeMax', 0.33333),
-            'Omega0': self.genic['Omega0'],
-            'CMBTemperature': self.genic['CMBTemperature'],
-            # Cooling model parameters
-            'CoolingOn': c.getint('CoolingOn', 1),
-            'TreeCoolFile': c.get('TreeCoolFile', 'TREECOOL_ep_2018p'),
-            
-        }
+        # TODO: Parameters that need to be set according to the cluster
+        self.max_mem_size_per_node = 0.6
+        self.cpu_time_hr = cpu_time_hr
 
-    def write_genic(self, fname: str = 'paramfile.genic'):
-        with open(self.outputdir / fname, 'w') as f:
-            for key, value in self.genic.items():
-                f.write(key + " = " + value.strip("'") + "\n")
-        print(f"MP-GenIC config is saved to {self.outputdir / fname}.")
+    def write_genic(self):
+        config = ConfigObj()
+        config.filename = 'paramfile.genic'
+
+        # Required parameters
+        config['OutputDir'] = self.output
+        config['FileBase'] = self.IC
+        config['BoxSize'] = self.box
+        config['Ngrid'] = self.ngrid
+        config['WhichSpectrum'] = 2
+        config['FileWithInputSpectrum'] = self.pk_filename
+        config['Omega0'] = self.OmegaMatter
+        config['OmegaBaryon'] = self.OmegaBaryon
+        config['OmegaLambda'] = self.OmegaLambda
+        config['HubbleParam'] = self.h
+        config['ProduceGas'] = self.produce_gas
+        config['Redshift'] = self.z_start
+        config['Seed'] = self.seed
+        config['DifferentTransferFunctions'] = self.different_transfer
+        config['ScaleDepVelocity'] = self.scale_dep_velocity
+        config['PrimordialAmp'] = self.As
+        config['PrimordialIndex'] = self.ns
+        config['MaxMemSizePerNode'] = self.max_mem_size_per_node
+
+        config.write()
+
+    def write_gadget(self):
+        config = ConfigObj()
+        config.filename = 'paramfile.gadget'
+
+        config['InitCondFile'] = self.output + '/' + self.IC
+        config['OutputDir'] = self.output
+        config['OutputList'] = self.output_list  # Check if this parses correctly.
+        config['TimeLimitCPU'] = 60*60*self.cpu_time_hr
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Creates necessary files for a lya simulation.")
-    parser.add_argument('paramfile')
-    parser.add_argument('outputdir')
-    args = parser.parse_args()
-    sim = LyaSimulation(args.paramfile, args.outputdir)
-    sim.read_genic()
-    sim.write_genic()
-    
+class LyaSimulation(Simulation):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.produce_gas = 1
+        self.different_transfer = 1
+        self.scale_dep_velocity = 1

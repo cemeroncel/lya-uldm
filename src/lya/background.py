@@ -2,18 +2,140 @@
 import numpy as np
 import natpy as nat
 from lya.species import Species
-from scipy.integrate import solve_ivp
+import lya.routines as routines
+from scipy.integrate import solve_ivp, OdeSolution
 
 
 def hubble(rho_arr: list[float]) -> float:
     return np.sqrt(np.sum(rho_arr))
 
 
-def initialize(Omega_g0: float, Omega_nu0: float, Omega_cdm0: float,
-               Omega_b0: float, Omega_Lambda0: float) -> dict:
+def get_hubble(rho_tot: float) -> float:
+    return np.sqrt(rho_tot)
+
+
+def get_energy_density_pf(Omega0: float, lna: float, H0: float,
+                          w: float) -> float:
+    return (H0**2)*Omega0/np.exp(w*lna)
+
+
+def initialize(H0: float, Omega_g0: float, Omega_nu0: float, Omega_cdm0: float,
+               Omega_b0: float, Omega_Lambda0: float | None = None,
+               Omega_scf0: float | None = None
+               ) -> dict:
+    # Either Omega_Lambda0 or Omega_scf0 should be given
+    if (Omega_Lambda0 is None) and (Omega_scf0 is None):
+        raise ValueError('Either `Omega_Lambda0` or `Omega_scf0` should be given!')
+
+    # If Omega_Lambda0 is None, get it from the budget equation
+    if Omega_Lambda0 is None:
+        Omega_Lambda0 = (1. - Omega_g0 - Omega_nu0
+                         - Omega_cdm0 - Omega_b0 - Omega_scf0)
+
+    # If Omega_scf0 is None, get it from the budget equation
+    if Omega_scf0 is None:
+        Omega_scf0 = (1. - Omega_g0 - Omega_nu0
+                      - Omega_cdm0 - Omega_b0 - Omega_Lambda0)
+
+    # Check whether the budget equation is satisfied
     Omega_tot = Omega_g0 + Omega_nu0 + Omega_cdm0 + Omega_b0 + Omega_Lambda0
     assert np.isclose(Omega_tot, 1.)
-    return {}
+
+    return {
+        'has_photon': Omega_g0 != 0.,
+        'has_massless_neutrino': Omega_nu0 != 0.,
+        'has_cdm': Omega_cdm0 != 0.,
+        'has_baryons': Omega_b0 != 0.,
+        'has_scf': Omega_scf0 != 0.,
+        'Omega_g0': Omega_g0,
+        'Omega_nu0': Omega_nu0,
+        'Omega_cdm0': Omega_cdm0,
+        'Omega_b0': Omega_b0,
+        'Omega_Lambda0': Omega_Lambda0,
+        'H0': H0
+    }
+
+
+def get_total_energy_density(bg: dict, lna: float) -> float:
+    rho_tot = 0.
+    rho_tot += get_energy_density_pf(bg['Omega_g0'], lna, bg['H0'], 4.)
+    rho_tot += get_energy_density_pf(bg['Omega_nu0'], lna, bg['H0'], 4.)
+    rho_tot += get_energy_density_pf(bg['Omega_cdm0'], lna, bg['H0'], 3.)
+    rho_tot += get_energy_density_pf(bg['Omega_b0'], lna, bg['H0'], 3.)
+    rho_tot += get_energy_density_pf(bg['Omega_Lambda0'], lna, bg['H0'], 0.)
+    return rho_tot
+
+
+def solve(bg: dict, z_ini: float = 1e14, z_fin: float = 0., **solve_ivp_args):
+    # Get the initial ln_a
+    lna_ini = np.log((1. + z_ini)**-1)
+
+    # Get the initial energy density
+    rho_ini = get_total_energy_density(bg, lna_ini)
+
+    # Get the initial Hubble
+    H_ini = get_hubble(rho_ini)
+
+    # Get the initial conditions for the conformal time tau, and
+    # physical time t.
+    tau_ini = np.exp(-lna_ini)/H_ini
+    t_ini = 0.5/H_ini
+
+    # Define the RHS of the system, i.e. the derivatives
+    def rhs(lna, y):
+        # y[0]: tau, y[1]: t
+        rho_tot = get_total_energy_density(bg, lna)
+        H = get_hubble(rho_tot)
+        return [np.exp(-lna)/H, 1./H]
+
+    # Integrate
+    sol = solve_ivp(rhs, [lna_ini, np.log(1./(1. + z_fin))],
+                    y0=[tau_ini, t_ini], **solve_ivp_args)
+
+    return sol
+
+
+def finalize(bg: dict, sol: OdeSolution):
+    # Dictionary that will hold the calculated values for the energy densities
+    bg['rho'] = {}
+    bg['rho']['rho_g'] = np.zeros(len(sol.t))
+    bg['rho']['rho_nu'] = np.zeros(len(sol.t))
+    bg['rho']['rho_cdm'] = np.zeros(len(sol.t))
+    bg['rho']['rho_b'] = np.zeros(len(sol.t))
+    bg['rho']['rho_Lambda'] = np.zeros(len(sol.t))
+
+    # Calculated values of the Hubble
+    bg['H'] = np.zeros(len(sol.t))
+
+    # Fill the arrays
+    for i, lna in enumerate(sol.t):
+        bg['rho']['rho_g'][i] = get_energy_density_pf(bg['Omega_g0'], lna,
+                                                      bg['H0'], 4.)
+        bg['rho']['rho_nu'][i] = get_energy_density_pf(bg['Omega_nu0'], lna,
+                                                       bg['H0'], 4.)
+        bg['rho']['rho_cdm'][i] = get_energy_density_pf(bg['Omega_cdm0'], lna,
+                                                        bg['H0'], 3.)
+        bg['rho']['rho_b'][i] = get_energy_density_pf(bg['Omega_b0'], lna,
+                                                      bg['H0'], 3.)
+        bg['rho']['rho_Lambda'][i] = get_energy_density_pf(bg['Omega_Lambda0'],
+                                                           lna, bg['H0'], 0.)
+        rho_tot = (bg['rho']['rho_g'][i] + bg['rho']['rho_nu'][i]
+                   + bg['rho']['rho_cdm'][i] + bg['rho']['rho_b'][i]
+                   + bg['rho']['rho_Lambda'][i])
+        bg['H'][i] = get_hubble(rho_tot)
+
+    # Other calculated parameters
+    bg['sol'] = sol
+    bg['z'] = 1./np.exp(sol.t) - 1.
+    bg['tau'] = sol.y[0]
+    bg['t'] = sol.y[1]
+
+    # We also need an interpolating function for H(tau)
+    bg['interps'] = {}
+    bg['interps']['H_vs_tau'] = routines.log_cubic_spline(bg['tau'], bg['H'])
+    bg['interps']['a_vs_tau'] = routines.log_cubic_spline(bg['tau'], np.exp(sol.t))
+
+    return bg
 
 
 def integrate(species_list: list[Species], z_ini: float = 1e14,

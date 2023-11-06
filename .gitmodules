@@ -1,0 +1,3 @@
+[submodule "external/MP-Gadget"]
+	path = external/MP-Gadget
+	url = https://github.com/MP-Gadget/MP-Gadget.git

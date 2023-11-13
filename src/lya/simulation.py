@@ -1,5 +1,9 @@
 """Module for creating the necessary files for a simulation."""
 from configobj import ConfigObj
+import os
+from classy import Class
+import numpy as np
+import math
 
 
 class Simulation:
@@ -7,7 +11,7 @@ class Simulation:
                  OmegaBaryon: float, OmegaLambda: float, h: float,
                  output_list: list[float], cpu_time_hr: float,
                  z_start: float = 99., seed: int = 960169,
-                 As: float = 2.215e-9, ns: float = 0.971,
+                 As: float = 2.100549e-9, ns: float = 0.9660499,
                  a_end: float = 1.):
         # Input parameters
         self.box = box
@@ -39,11 +43,12 @@ class Simulation:
 
         # Required parameters
         config['OutputDir'] = self.output
-        config['FileBase'] = self.IC
+        config['FileBase'] = self.ic
         config['BoxSize'] = self.box
         config['Ngrid'] = self.ngrid
         config['WhichSpectrum'] = 2
         config['FileWithInputSpectrum'] = self.pk_filename
+        config['FileWithTransferFunction'] = self.tk_filename
         config['Omega0'] = self.OmegaMatter
         config['OmegaBaryon'] = self.OmegaBaryon
         config['OmegaLambda'] = self.OmegaLambda
@@ -64,9 +69,9 @@ class Simulation:
         config.filename = 'paramfile.gadget'
 
         # Required parameters
-        config['InitCondFile'] = self.output + '/' + self.IC
+        config['InitCondFile'] = self.output + '/' + self.ic
         config['OutputDir'] = self.output
-        config['OutputList'] = self.output_list  # Check if this parses correctly.
+        config['OutputList'] = str(self.output_list).strip('[]').strip()
         config['TimeLimitCPU'] = 60*60*self.cpu_time_hr
         config['SnapshotWithFOF'] = self.snapshot_with_fof
         config['BlackHoleOn'] = self.black_hole_on
@@ -107,6 +112,67 @@ class Simulation:
         config['MaxMemSizePerNode'] = self.max_mem_size_per_node
         config['InitGasTemp'] = self.init_gas_temp
         config['MinGasTemp'] = self.min_gas_temp
+
+        # Write to config
+        config.write()
+
+    def make_class_power(self):
+        # The box size is given in internal units.
+        # Default value for Unit length in MPGadget is 1.0 kpc/h
+        box_in_Mpc_over_h = 1e-3*self.box
+
+        self.class_cosmo = Class()
+        self.class_cosmo.set({
+            'output': 'mPk,dTk,vTk',
+            'extra_metric_transfer_functions': 'yes',
+            'gauge': 'synchronous',
+            'h': self.h,
+            'omega_b': (self.h**2)*self.OmegaBaryon,
+            'omega_cdm': (self.h**2)*(self.OmegaMatter - self.OmegaBaryon),
+            'A_s': self.As,
+            'n_s': self.ns,
+            'P_k_max_h/Mpc': max(10, 2*math.pi*self.ngrid*4/box_in_Mpc_over_h),
+            'z_pk': self.z_start,
+            'tol_background_integration': 1e-9,
+            # 'tol_perturb_integration': 1e-9,
+            'tol_thermo_integration': 1e-5,
+            'k_per_decade_for_pk': 50,
+            'k_bao_width': 8,
+            'k_per_decade_for_bao': 200,
+            'neglect_CMB_sources_below_visibility': 1e-30,
+            'transfer_neglect_late_source': 3000.,
+            'l_max_g': 50,
+            'l_max_ur': 150
+        })
+        self.class_cosmo.compute()
+
+    def class_transfer_save(self):
+        transfer = self.class_cosmo.get_transfer(z=self.z_start)
+        trans_fname = self.tk_filename
+        trans_array = []
+        header = (f"Transfer functions T_i(k) for adiabatic (AD) mode"
+                  "(normalized to initial curvature=1) at redshift "
+                  f"z={self.z_start}\n"
+                  f"for k={transfer['k (h/Mpc)'][0]} to "
+                  f"{transfer['k (h/Mpc)'][-1]} h/Mpc,\n"
+                  f"number of wavenumbers equal to {len(transfer['k (h/Mpc)'])}\n"
+                  "d_i   stands for (delta rho_i/rho_i)(k,z) with above normalization\n"
+                  "d_tot stands for (delta rho_tot/rho_tot)(k,z) with rho_Lambda NOT included in rho_tot\n"
+                  "(note that this differs from the transfer function output from CAMB/CMBFAST, which gives the same\n"
+                  "t_i   stands for theta_i(k,z) with above normalization\n"
+                  "t_tot stands for (sum_i [rho_i+p_i] theta_i)/(sum_i [rho_i+p_i]))(k,z)\n\n")
+
+        i = 1
+        col_number = len(transfer.keys())
+        for k, v in transfer.items():
+            trans_array.append(v)
+            header += (str(i) + ':' +str(k))
+            if i < col_number:
+                header += '\t'
+            i += 1
+
+        np.savetxt(trans_fname, trans_array, header=header, fmt='%.12e',
+                   delimiter='\t')
 
 
 class LyaSimulation(Simulation):

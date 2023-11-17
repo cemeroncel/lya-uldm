@@ -14,9 +14,11 @@ def get_hubble(rho_tot: float) -> float:
     return np.sqrt(rho_tot)
 
 
-def get_energy_density_pf(Omega0: float, lna: float, H0: float,
-                          w: float) -> float:
-    return (H0**2)*Omega0/np.exp(w*lna)
+def get_densities_pf(Omega0: float, lna: float, H0: float,
+                     w: float) -> tuple[float, float]:
+    # return (H0**2)*Omega0/np.exp(w*lna), w*(H0**2)*Omega0/np.exp(w*lna)
+    return ((H0**2)*Omega0/np.exp(3.*(1. + w)*lna),
+            w*(H0**2)*Omega0/np.exp(3.*(1. + w)*lna))
 
 
 def initialize(H0: float, Omega_g0: float, Omega_nu0: float, Omega_cdm0: float,
@@ -56,14 +58,36 @@ def initialize(H0: float, Omega_g0: float, Omega_nu0: float, Omega_cdm0: float,
     }
 
 
-def get_total_energy_density(bg: dict, lna: float) -> float:
+def get_total_energy_density_and_eos(bg: dict, lna: float
+                                     ) -> tuple[float, float]:
     rho_tot = 0.
-    rho_tot += get_energy_density_pf(bg['Omega_g0'], lna, bg['H0'], 4.)
-    rho_tot += get_energy_density_pf(bg['Omega_nu0'], lna, bg['H0'], 4.)
-    rho_tot += get_energy_density_pf(bg['Omega_cdm0'], lna, bg['H0'], 3.)
-    rho_tot += get_energy_density_pf(bg['Omega_b0'], lna, bg['H0'], 3.)
-    rho_tot += get_energy_density_pf(bg['Omega_Lambda0'], lna, bg['H0'], 0.)
-    return rho_tot
+    p_tot = 0.
+
+    # Photons
+    rho_g, p_g = get_densities_pf(bg['Omega_g0'], lna, bg['H0'], 1./3.)
+    rho_tot += rho_g
+    p_tot += p_g
+
+    # Massless neutrinos
+    rho_nu, p_nu = get_densities_pf(bg['Omega_nu0'], lna, bg['H0'], 1./3.)
+    rho_tot += rho_nu
+    p_tot += p_nu
+
+    # Cold dark matter
+    rho_cdm, p_cdm = get_densities_pf(bg['Omega_cdm0'], lna, bg['H0'], 0.)
+    rho_tot += rho_cdm
+    p_tot += p_cdm
+
+    # Baryons
+    rho_b, p_b = get_densities_pf(bg['Omega_b0'], lna, bg['H0'], 0.)
+    rho_tot += rho_b
+    p_tot += p_b
+
+    # Dark energy
+    rho_L, p_L = get_densities_pf(bg['Omega_Lambda0'], lna, bg['H0'], -1.)
+    rho_tot += rho_L
+    p_tot += p_L
+    return rho_tot, p_tot
 
 
 def solve(bg: dict, z_ini: float = 1e14, z_fin: float = 0., **solve_ivp_args):
@@ -71,7 +95,7 @@ def solve(bg: dict, z_ini: float = 1e14, z_fin: float = 0., **solve_ivp_args):
     lna_ini = np.log((1. + z_ini)**-1)
 
     # Get the initial energy density
-    rho_ini = get_total_energy_density(bg, lna_ini)
+    rho_ini = get_total_energy_density_and_eos(bg, lna_ini),
 
     # Get the initial Hubble
     H_ini = get_hubble(rho_ini)
@@ -84,7 +108,7 @@ def solve(bg: dict, z_ini: float = 1e14, z_fin: float = 0., **solve_ivp_args):
     # Define the RHS of the system, i.e. the derivatives
     def rhs(lna, y):
         # y[0]: tau, y[1]: t
-        rho_tot = get_total_energy_density(bg, lna)
+        rho_tot = get_total_energy_density_and_eos(bg, lna_ini),
         H = get_hubble(rho_tot)
         return [np.exp(-lna)/H, 1./H]
 
@@ -104,21 +128,25 @@ def finalize(bg: dict, sol: OdeSolution):
     bg['rho']['rho_b'] = np.zeros(len(sol.t))
     bg['rho']['rho_Lambda'] = np.zeros(len(sol.t))
 
+    # Dictionary that will hold the calculated values for the pressure densities
+    bg['pre'] = {}
+    bg['pre']['pre_g'] = np.zeros(len(sol.t))
+    bg['pre']['pre_nu'] = np.zeros(len(sol.t))
+    bg['pre']['pre_cdm'] = np.zeros(len(sol.t))
+    bg['pre']['pre_b'] = np.zeros(len(sol.t))
+    bg['pre']['pre_Lambda'] = np.zeros(len(sol.t))
+
     # Calculated values of the Hubble
     bg['H'] = np.zeros(len(sol.t))
 
     # Fill the arrays
     for i, lna in enumerate(sol.t):
-        bg['rho']['rho_g'][i] = get_energy_density_pf(bg['Omega_g0'], lna,
-                                                      bg['H0'], 4.)
-        bg['rho']['rho_nu'][i] = get_energy_density_pf(bg['Omega_nu0'], lna,
-                                                       bg['H0'], 4.)
-        bg['rho']['rho_cdm'][i] = get_energy_density_pf(bg['Omega_cdm0'], lna,
-                                                        bg['H0'], 3.)
-        bg['rho']['rho_b'][i] = get_energy_density_pf(bg['Omega_b0'], lna,
-                                                      bg['H0'], 3.)
-        bg['rho']['rho_Lambda'][i] = get_energy_density_pf(bg['Omega_Lambda0'],
-                                                           lna, bg['H0'], 0.)
+        bg['rho']['rho_g'][i], bg['pre']['pre_g'] = get_densities_pf(bg['Omega_g0'], lna, bg['H0'], 1./3.)
+        bg['rho']['rho_nu'][i], bg['pre']['pre_nu'] = get_densities_pf(bg['Omega_nu0'], lna, bg['H0'], 1./3.)
+        bg['rho']['rho_cdm'][i], bg['pre']['pre_cdm'] = get_densities_pf(bg['Omega_cdm0'], lna, bg['H0'], 0.)
+        bg['rho']['rho_b'][i], bg['pre']['pre_b'] = get_densities_pf(bg['Omega_b0'], lna, bg['H0'], 0.)
+        bg['rho']['rho_Lambda'][i], bg['pre']['pre_Lambda'] = get_densities_pf(bg['Omega_Lambda0'], lna, bg['H0'], -1.)
+
         rho_tot = (bg['rho']['rho_g'][i] + bg['rho']['rho_nu'][i]
                    + bg['rho']['rho_cdm'][i] + bg['rho']['rho_b'][i]
                    + bg['rho']['rho_Lambda'][i])
